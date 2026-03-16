@@ -412,103 +412,7 @@
     .btn { padding: 8px 12px; font-size: 0.8rem; }
   }
 
-  /* ── Login Screen ── */
-  #login-screen {
-    position: fixed;
-    inset: 0;
-    background: var(--bg-primary);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 99999;
-  }
-  #login-screen.hidden { display: none; }
-
-  .login-box {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-bright);
-    border-radius: 16px;
-    padding: 44px 40px;
-    width: 100%;
-    max-width: 400px;
-    box-shadow: 0 12px 40px rgba(0,0,0,0.5);
-    text-align: center;
-  }
-  .login-box h2 {
-    font-size: 1.5rem;
-    margin-bottom: 6px;
-    border: none;
-    padding: 0;
-    color: var(--text-primary);
-    text-transform: none;
-    letter-spacing: -0.01em;
-  }
-  .login-box p {
-    color: var(--text-secondary);
-    font-size: 0.875rem;
-    margin: 0 0 28px 0;
-  }
-  .login-field {
-    position: relative;
-    margin-bottom: 16px;
-  }
-  .login-field input {
-    width: 100%;
-    padding: 13px 46px 13px 16px;
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border-bright);
-    border-radius: 8px;
-    color: var(--text-primary);
-    font-size: 1rem;
-    font-family: 'Inter', sans-serif;
-    transition: border-color 0.2s;
-  }
-  .login-field input::placeholder { color: var(--text-muted); }
-  .login-field input:focus {
-    border-color: var(--accent-blue);
-    outline: none;
-    box-shadow: 0 0 0 3px rgba(96,165,250,0.15);
-  }
-  .toggle-pw {
-    position: absolute;
-    right: 12px;
-    top: 50%;
-    transform: translateY(-50%);
-    background: none;
-    border: none;
-    color: var(--text-secondary);
-    cursor: pointer;
-    font-size: 1.1rem;
-    padding: 0;
-    line-height: 1;
-  }
-  .toggle-pw:hover { color: var(--text-primary); }
-  .login-error {
-    color: var(--accent-red);
-    font-size: 0.8rem;
-    margin-bottom: 12px;
-    min-height: 1.2em;
-    background: var(--accent-red-dim);
-    border-radius: 6px;
-    padding: 4px 8px;
-  }
-  .login-error:empty { background: none; padding: 0; }
-  .btn-login {
-    width: 100%;
-    padding: 13px;
-    background: var(--accent-blue);
-    color: white;
-    border: none;
-    border-radius: 8px;
-    font-size: 1rem;
-    font-weight: 700;
-    cursor: pointer;
-    font-family: 'Inter', sans-serif;
-    transition: background 0.2s, box-shadow 0.2s;
-    letter-spacing: 0.02em;
-  }
-  .btn-login:hover { background: #3b82f6; box-shadow: 0 0 18px rgba(96,165,250,0.35); }
-  .btn-login:disabled { opacity: 0.45; cursor: not-allowed; }
+  
 
   /* Filter Items */
   .filter-item {
@@ -528,21 +432,7 @@
 </head>
 <body>
 
-<!-- Login Screen -->
-<div id="login-screen">
-  <div class="login-box">
-    <div style="font-size:2.5rem; margin-bottom:12px;">🎯</div>
-    <h2>UT Bot Dashboard</h2>
-    <p>Pro Edition — Enter your password to continue</p>
-    <div class="login-field">
-      <input type="password" id="pw-input" placeholder="Password" autocomplete="current-password" onkeydown="if(event.key==='Enter') doLogin()">
-      <button class="toggle-pw" id="toggle-pw-btn" onclick="togglePwVisibility()" tabindex="-1" title="Show/hide password">👁️</button>
-    </div>
-    <div class="login-error" id="login-error"></div>
-    <button class="btn-login" id="login-btn" onclick="doLogin()">Unlock Dashboard</button>
-  </div>
-</div>
-
+    
 <div class="container">
   <h1>
     ⚡ Advanced Scalping Dashboard <span style="font-size: 1rem; color: var(--accent-blue); background: rgba(88,166,255,0.1); padding: 5px 10px; border-radius: 20px;">Pro Edition</span>
@@ -2164,38 +2054,7 @@ async function confirmClearHistory() {
     Toast.show('✅ Trade history cleared successfully', 'success');
 }
 
-// ── Password & Login ──────────────────────────────────────────────
-const DASHBOARD_PASSWORD = 'sam@algo';
 
-function togglePwVisibility() {
-    const input = document.getElementById('pw-input');
-    const btn   = document.getElementById('toggle-pw-btn');
-    if (input.type === 'password') {
-        input.type = 'text';
-        btn.textContent = '\u{1F648}';
-    } else {
-        input.type = 'password';
-        btn.textContent = '\u{1F441}\uFE0F';
-    }
-}
-
-function doLogin() {
-    const pw = document.getElementById('pw-input').value;
-    if (!pw) { document.getElementById('login-error').textContent = 'Please enter a password.'; return; }
-
-    if (pw === DASHBOARD_PASSWORD) {
-        unlockDashboard();
-    } else {
-        document.getElementById('login-error').textContent = 'Incorrect password. Try again.';
-        document.getElementById('pw-input').value = '';
-        document.getElementById('pw-input').focus();
-    }
-}
-
-function unlockDashboard() {
-    document.getElementById('login-screen').classList.add('hidden');
-    startApp();
-}
 
 // ── App Bootstrap ─────────────────────────────────────────────────
 const tradingEngine = new TradingEngine();
@@ -2311,11 +2170,10 @@ async function startApp() {
     window.addEventListener('pagehide', () => tradingEngine.saveState());
 }
 
-// Show login screen on load — don't start app until authenticated
+// Auto-start app on load
+startApp();
 
 // Expose functions needed by HTML onclick attributes (required for type="module")
-window.doLogin         = doLogin;
-window.togglePwVisibility = togglePwVisibility;
 window.tradingEngine   = tradingEngine;
 window.chartManager    = chartManager;
 
