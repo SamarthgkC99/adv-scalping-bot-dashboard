@@ -696,6 +696,30 @@
   </div>
 </div>
 
+
+  <!-- Ping Status Widget -->
+  <div id="ping-widget" style="
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 0.75rem;
+    z-index: 9998;
+    box-shadow: var(--shadow-md);
+    min-width: 180px;
+  ">
+    <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
+      <span id="ping-dot" style="width:8px;height:8px;border-radius:50%;background:var(--text-muted);display:inline-block;animation:pulse 2s infinite;"></span>
+      <span style="font-weight:700; color:var(--text-secondary);">Bot Server</span>
+      <span id="ping-status" style="margin-left:auto; font-weight:700;">Checking...</span>
+    </div>
+    <div id="ping-time" style="color:var(--text-muted); font-size:0.7rem;">Pinging...</div>
+    <div style="color:var(--text-muted); font-size:0.68rem; margin-top:2px;">Auto-ping every 5 min</div>
+  </div>
+
 <!-- Toast Container -->
 <div id="toast-container"></div>
 
@@ -2176,6 +2200,42 @@ startApp();
 // Expose functions needed by HTML onclick attributes (required for type="module")
 window.tradingEngine   = tradingEngine;
 window.chartManager    = chartManager;
+
+// ── Keep-Alive Ping ───────────────────────────────────────────────
+// Pings the Render bot every 5 minutes to prevent sleep
+const PING_URL      = 'https://adv-scalping-bot-dashboard.onrender.com/health';
+const PING_INTERVAL = 5 * 60 * 1000; // 5 minutes
+
+async function pingBot() {
+    try {
+        const res = await fetch(PING_URL, { method: 'GET', mode: 'no-cors' });
+        console.log('[' + new Date().toLocaleTimeString() + '] ✅ Bot pinged successfully');
+        updatePingStatus('✅ Alive', true);
+    } catch(e) {
+        console.warn('[' + new Date().toLocaleTimeString() + '] ⚠️ Ping failed:', e.message);
+        updatePingStatus('⚠️ Unreachable', false);
+    }
+}
+
+function updatePingStatus(msg, ok) {
+    const el = document.getElementById('ping-status');
+    if (el) {
+        el.textContent = msg;
+        el.style.color = ok ? 'var(--accent-green)' : 'var(--accent-yellow)';
+    }
+    const dot = document.getElementById('ping-dot');
+    if (dot) {
+        dot.style.background = ok ? 'var(--accent-green)' : 'var(--accent-yellow)';
+    }
+    const time = document.getElementById('ping-time');
+    if (time) time.textContent = 'Last ping: ' + new Date().toLocaleTimeString();
+}
+
+// Ping immediately on load then every 5 minutes
+pingBot();
+setInterval(pingBot, PING_INTERVAL);
+
+
 
 </script>
 
