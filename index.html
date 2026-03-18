@@ -432,7 +432,6 @@
 </head>
 <body>
 
- 
 
 <div class="container">
   <h1>
@@ -2381,40 +2380,27 @@ window.chartManager    = chartManager;
 
 // ── Full Ping History System ──────────────────────────────────────
 // Uses an <img> tag trick to bypass CORS — works on all browsers
-const PING_URL      = 'https://adv-scalping-bot-dashboard.onrender.com';
+const PING_URL      = 'https://adv-scalping-bot.onrender.com/ping';
 const PING_INTERVAL = 5 * 60 * 1000;
 const _pingHistory  = JSON.parse(localStorage.getItem('ping_history') || '[]');
 let   _pingCounter  = _pingHistory.length;
 
 function pingBot() {
-    const startTime = Date.now();
-    const timeIST   = new Date().toLocaleString('en-IN', {
+    const timeIST = new Date().toLocaleString('en-IN', {
         timeZone:'Asia/Kolkata', day:'2-digit', month:'short',
         year:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit'
     });
 
-    // Use Image trick to bypass CORS — if server is up, onload fires
-    // If server is down/sleeping, onerror fires
-    const img = new Image();
-    const timeoutId = setTimeout(function() {
-        img.src = ''; // cancel
-        recordPing(false, timeIST, Date.now() - startTime, 'TIMEOUT', '⏱️ Timed out (>8s)');
-    }, 8000);
-
-    img.onload = img.onerror = function(e) {
-        clearTimeout(timeoutId);
-        const elapsed = Date.now() - startTime;
-        // onerror fires even for non-image URLs when server responds (CORS)
-        // onload would only fire if server returns an actual image
-        // Both mean server is reachable — timeout means it is not
-        const ok   = true; // if either fires before timeout, server is up
-        const note = elapsed < 500  ? '⚡ Fast'
-                   : elapsed < 2000 ? '✅ Normal'
-                   : elapsed < 5000 ? '🐢 Slow'
-                   : '⚠️ Very slow';
-        recordPing(ok, timeIST, elapsed, 200, note);
-    };
-    img.src = PING_URL + '/health?t=' + Date.now();
+    // fire-and-forget: no-cors bypasses all CORS restrictions
+    // we don't read the response — just wake the server up
+    fetch(PING_URL, { method: 'GET', mode: 'no-cors', cache: 'no-store' })
+        .then(function() {
+            recordPing(true, timeIST, '🔥 Sent', 'no-cors', '✅ Request fired');
+        })
+        .catch(function(e) {
+            // This only fires if there's a network-level failure (no internet etc.)
+            recordPing(false, timeIST, '--', 'ERR', '❌ ' + (e.message || 'Network error'));
+        });
 }
 
 function recordPing(ok, timeIST, elapsed, httpCode, note) {
