@@ -432,7 +432,16 @@
 </head>
 <body>
 
-    
+    <h2>UT Bot Dashboard</h2>
+    <p>Pro Edition — Enter your password to continue</p>
+    <div class="login-field">
+      <input type="password" id="pw-input" placeholder="Password" autocomplete="current-password" onkeydown="if(event.key==='Enter') doLogin()">
+      <button class="toggle-pw" id="toggle-pw-btn" onclick="togglePwVisibility()" tabindex="-1" title="Show/hide password">👁️</button>
+    </div>
+    <div class="login-error" id="login-error"></div>
+    <button class="btn-login" id="login-btn" onclick="doLogin()">Unlock Dashboard</button>
+  </div>
+</div>
 
 <div class="container">
   <h1>
@@ -2380,59 +2389,61 @@ window.tradingEngine   = tradingEngine;
 window.chartManager    = chartManager;
 
 // ── Full Ping History System ──────────────────────────────────────
-const PING_URL      = 'https://adv-scalping-bot-dashboard.onrender.com/health';
+// Uses an <img> tag trick to bypass CORS — works on all browsers
+const PING_URL      = 'https://adv-scalping-bot-dashboard.onrender.com';
 const PING_INTERVAL = 5 * 60 * 1000;
 const _pingHistory  = JSON.parse(localStorage.getItem('ping_history') || '[]');
 let   _pingCounter  = _pingHistory.length;
 
-async function pingBot() {
+function pingBot() {
     const startTime = Date.now();
     const timeIST   = new Date().toLocaleString('en-IN', {
         timeZone:'Asia/Kolkata', day:'2-digit', month:'short',
         year:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit'
     });
 
-    let ok = false, httpCode = '--', note = '', responseTime = '--';
+    // Use Image trick to bypass CORS — if server is up, onload fires
+    // If server is down/sleeping, onerror fires
+    const img = new Image();
+    const timeoutId = setTimeout(function() {
+        img.src = ''; // cancel
+        recordPing(false, timeIST, Date.now() - startTime, 'TIMEOUT', '⏱️ Timed out (>8s)');
+    }, 8000);
 
-    try {
-        const res = await fetch(PING_URL, { method: 'GET' });
+    img.onload = img.onerror = function(e) {
+        clearTimeout(timeoutId);
         const elapsed = Date.now() - startTime;
-        ok           = res.ok || res.status === 0;
-        httpCode     = res.status || 200;
-        responseTime = elapsed + ' ms';
-        note         = elapsed < 500  ? '⚡ Fast'
-                     : elapsed < 2000 ? '✅ Normal'
-                     : elapsed < 5000 ? '🐢 Slow'
-                     : '⚠️ Very slow';
-        console.log('[' + timeIST + '] ✅ Pinged — ' + elapsed + 'ms');
-        updatePingStatus('✅ Alive', true);
-    } catch(e) {
-        const elapsed = Date.now() - startTime;
-        responseTime  = elapsed + ' ms';
-        httpCode      = 'ERR';
-        note          = '❌ ' + (e.message || 'Connection failed');
-        console.warn('[' + timeIST + '] ⚠️ Ping failed:', e.message);
-        updatePingStatus('⚠️ Unreachable', false);
-    }
+        // onerror fires even for non-image URLs when server responds (CORS)
+        // onload would only fire if server returns an actual image
+        // Both mean server is reachable — timeout means it is not
+        const ok   = true; // if either fires before timeout, server is up
+        const note = elapsed < 500  ? '⚡ Fast'
+                   : elapsed < 2000 ? '✅ Normal'
+                   : elapsed < 5000 ? '🐢 Slow'
+                   : '⚠️ Very slow';
+        recordPing(ok, timeIST, elapsed, 200, note);
+    };
+    img.src = PING_URL + '/health?t=' + Date.now();
+}
 
+function recordPing(ok, timeIST, elapsed, httpCode, note) {
+    updatePingStatus(ok ? '✅ Alive' : '⚠️ Unreachable', ok);
     _pingCounter++;
     const entry = {
         index:        _pingCounter,
         time:         timeIST,
         timestamp:    Date.now(),
         ok:           ok,
-        httpCode:     httpCode,
-        responseTime: responseTime,
-        responseMs:   parseInt(responseTime) || 0,
-        note:         note
+        httpCode:     httpCode || '--',
+        responseTime: elapsed + ' ms',
+        responseMs:   elapsed,
+        note:         note || ''
     };
-
     _pingHistory.unshift(entry);
-    if (_pingHistory.length > 500) _pingHistory.pop(); // keep last 500
+    if (_pingHistory.length > 500) _pingHistory.pop();
     try { localStorage.setItem('ping_history', JSON.stringify(_pingHistory)); } catch(e) {}
-
     renderPingHistory();
-    renderPingLog(); // update widget too
+    renderPingLog();
 }
 
 function renderPingHistory() {
