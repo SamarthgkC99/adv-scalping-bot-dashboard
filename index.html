@@ -432,7 +432,8 @@
 </head>
 <body>
 
-    
+   
+
 <div class="container">
   <h1>
     ⚡ Advanced Scalping Dashboard <span style="font-size: 1rem; color: var(--accent-blue); background: rgba(88,166,255,0.1); padding: 5px 10px; border-radius: 20px;">Pro Edition</span>
@@ -699,25 +700,20 @@
 
   <!-- Ping Status Widget -->
   <div id="ping-widget" style="
-    position: fixed;
-    bottom: 20px;
-    left: 20px;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: 10px;
-    padding: 10px 14px;
-    font-size: 0.75rem;
-    z-index: 9998;
-    box-shadow: var(--shadow-md);
-    min-width: 180px;
+    position: fixed; bottom: 20px; left: 20px;
+    background: var(--bg-secondary); border: 1px solid var(--border-color);
+    border-radius: 10px; padding: 10px 14px; font-size: 0.75rem;
+    z-index: 9998; box-shadow: var(--shadow-md); min-width: 220px; max-width:260px;
   ">
     <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
-      <span id="ping-dot" style="width:8px;height:8px;border-radius:50%;background:var(--text-muted);display:inline-block;animation:pulse 2s infinite;"></span>
+      <span id="ping-dot" style="width:8px;height:8px;border-radius:50%;background:var(--text-muted);display:inline-block;animation:pulse 2s infinite;flex-shrink:0;"></span>
       <span style="font-weight:700; color:var(--text-secondary);">Bot Server</span>
       <span id="ping-status" style="margin-left:auto; font-weight:700;">Checking...</span>
     </div>
-    <div id="ping-time" style="color:var(--text-muted); font-size:0.7rem;">Pinging...</div>
-    <div style="color:var(--text-muted); font-size:0.68rem; margin-top:2px;">Auto-ping every 5 min</div>
+    <div id="ping-time" style="color:var(--text-muted); font-size:0.7rem; margin-bottom:6px;">Pinging...</div>
+    <div style="font-size:0.68rem; color:var(--text-muted); margin-bottom:4px; text-transform:uppercase; letter-spacing:0.05em;">Ping Log</div>
+    <ul id="ping-log" style="list-style:none;padding:0;margin:0;max-height:80px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--border-bright) transparent;"></ul>
+    <div style="color:var(--text-muted); font-size:0.68rem; margin-top:6px; border-top:1px solid var(--border-color); padding-top:4px;">Auto-ping every 5 min</div>
   </div>
 
 <!-- Toast Container -->
@@ -1005,68 +1001,200 @@ class TradingEngine {
     }
 
     // API Interaction
-    async fetchData() {
-        try {
-            const response = await fetch('https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=350');
-            if (!response.ok) throw new Error('API Error');
-            const data = await response.json();
-            
-            const candles = data.map(d => ({
-                time: d[0],
-                open: parseFloat(d[1]),
-                high: parseFloat(d[2]),
-                low: parseFloat(d[3]),
-                close: parseFloat(d[4]),
-                volume: parseFloat(d[5])
-            }));
-            return candles;
-        } catch (e) {
-            console.error("Fetch error", e);
-            return null;
+    // ── Fetch both 5m and 1h candles ──────────────────────────────
+    async fetchCandles(interval, limit) {
+        const endpoints = [
+            `https://api.binance.us/api/v3/klines?symbol=BTCUSDT&interval=${interval}&limit=${limit}`,
+            `https://fapi.binance.com/fapi/v1/klines?symbol=BTCUSDT&interval=${interval}&limit=${limit}`,
+            `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=${interval}&limit=${limit}`
+        ];
+        for (const url of endpoints) {
+            try {
+                const res  = await fetch(url);
+                const data = await res.json();
+                if (!Array.isArray(data)) continue;
+                return data.map(d => ({
+                    time: d[0], open: parseFloat(d[1]), high: parseFloat(d[2]),
+                    low: parseFloat(d[3]), close: parseFloat(d[4]), volume: parseFloat(d[5])
+                }));
+            } catch(e) { console.warn('Endpoint failed:', url, e.message); }
         }
+        return null;
     }
 
-    processSignal(candles) {
-        const closes = candles.map(c => c.close);
-        const highs = candles.map(c => c.high);
-        const lows = candles.map(c => c.low);
+    async fetchData() {
+        const candles5m = await this.fetchCandles('5m', 350);
+        const candles1h = await this.fetchCandles('1h', 210);
+        if (!candles5m) return null;
+        this._candles1h = candles1h || [];
+        return candles5m;
+    }
 
-        // UT Bot 2 (Buy) - KV=2, ATR=300
-        const utBot2 = Utils.calculateUTBot(closes, highs, lows, 2, 300);
-        // UT Bot 1 (Sell) - KV=2, ATR=1
-        const utBot1 = Utils.calculateUTBot(closes, highs, lows, 2, 1);
+    // ── EMA ──────────────────────────────────────────────────────
+    calcEMA(values, period) {
+        const k = 2 / (period + 1);
+        let ema = [], prev = 0, started = false;
+        for (let i = 0; i < values.length; i++) {
+            if (!started) {
+                if (i < period - 1) { ema.push(null); continue; }
+                let sum = 0;
+                for (let j = i - period + 1; j <= i; j++) sum += values[j];
+                prev = sum / period; ema.push(prev); started = true;
+            } else {
+                prev = values[i] * k + prev * (1 - k); ema.push(prev);
+            }
+        }
+        return ema;
+    }
 
-        const latestPrice = closes[closes.length - 1];
-        const signalBuy = utBot2.pos[utBot2.pos.length - 1] === 1 ? "Buy" : "Hold";
-        const signalSell = utBot1.pos[utBot1.pos.length - 1] === -1 ? "Sell" : "Hold";
-        
-        let finalSignal = "Hold";
-        if (signalBuy === "Buy") finalSignal = "Buy";
-        else if (signalSell === "Sell") finalSignal = "Sell";
+    // ── RSI ──────────────────────────────────────────────────────
+    calcRSI(closes, period) {
+        period = period || 14;
+        return closes.map((_, i) => {
+            if (i < period) return null;
+            let gains = 0, losses = 0;
+            for (let j = i - period + 1; j <= i; j++) {
+                const d = closes[j] - closes[j-1];
+                if (d > 0) gains += d; else losses -= d;
+            }
+            const avgG = gains / period, avgL = losses / period;
+            if (avgL === 0) return 100;
+            return 100 - 100 / (1 + avgG / avgL);
+        });
+    }
 
-        const atr14 = Utils.calculateATR(highs, lows, closes, 14);
-        const currentAtr = atr14[atr14.length - 1] || 0;
-        const currentStop = (finalSignal === "Buy") ? utBot2.stop[utBot2.stop.length-1] : utBot1.stop[utBot1.stop.length-1];
+    // ── Volume SMA ───────────────────────────────────────────────
+    calcVolSMA(candles, period) {
+        return candles.map((_, i) => {
+            if (i < period - 1) return null;
+            let sum = 0;
+            for (let j = i - period + 1; j <= i; j++) sum += candles[j].volume;
+            return sum / period;
+        });
+    }
 
-        const buySignals = Utils.detectSignalChanges(candles, utBot2.pos, 1); 
-        const sellSignals = Utils.detectSignalChanges(candles, utBot1.pos, -1); 
+    // ── Session check (12:30–22:30 IST = 07:00–17:00 UTC) ───────
+    isInSession() {
+        const now = new Date();
+        const utcMin = now.getUTCHours() * 60 + now.getUTCMinutes();
+        return utcMin >= 420 && utcMin < 1020;
+    }
+
+    processSignal(candles5m) {
+        const closes  = candles5m.map(c => c.close);
+        const highs   = candles5m.map(c => c.high);
+        const lows    = candles5m.map(c => c.low);
+        const n       = closes.length;
+        const last    = candles5m[n - 1];
+        const price   = last.close;
+
+        // ── UT Bot ATR trailing stop ──
+        const utBot2  = Utils.calculateUTBot(closes, highs, lows, 2, 300);
+        const utBot1  = Utils.calculateUTBot(closes, highs, lows, 2, 1);
+        const utPos   = utBot2.pos[n-1], utPosPrev = utBot2.pos[n-2];
+        const utSPos  = utBot1.pos[n-1], utSPosPrev = utBot1.pos[n-2];
+        const utBuy   = utPos  ===  1 && utPosPrev !== 1;
+        const utSell  = utSPos === -1 && utSPosPrev !== -1;
+
+        // ── ATR 14 ──
+        const atr14arr  = Utils.calculateATR(highs, lows, closes, 14);
+        const currentATR= atr14arr[n-1] || 0;
+        const prevATR   = atr14arr[n-11] || 0;
+
+        // ── RSI ──
+        const rsiArr    = this.calcRSI(closes, 14);
+        const currentRSI= rsiArr[n-1] || 50;
+
+        // ── Volume ──
+        const volSMA    = this.calcVolSMA(candles5m, 20);
+        const avgVol    = volSMA[n-1] || 1;
+        const curVol    = last.volume;
+
+        // ── Candle size ──
+        const candleSize= Math.abs(last.close - last.open);
+
+        // ── 1H EMA 200 ──
+        let ema200 = 0;
+        const c1h = this._candles1h || [];
+        if (c1h.length >= 200) {
+            const closes1h = c1h.map(c => c.close);
+            const ema200arr = this.calcEMA(closes1h, 200);
+            ema200 = ema200arr[ema200arr.length - 1] || 0;
+        }
+
+        // ── Filter checks ──
+        const trendUp   = ema200 > 0 ? price > ema200 : true;
+        const trendDown = ema200 > 0 ? price < ema200 : true;
+        const rsiLong   = currentRSI > 50;
+        const rsiShort  = currentRSI < 50;
+        const volOk     = curVol > avgVol;
+        const atrExpand = currentATR > prevATR;
+        const candleOk  = candleSize < 2 * currentATR;
+        const sessionOk = this.isInSession();
+
+        // ── Strong momentum ──
+        const strongLong  = currentRSI > 60 && curVol >= avgVol * 1.5;
+        const strongShort = currentRSI < 40 && curVol >= avgVol * 1.5;
+
+        // ── Final signal with all filters ──
+        const longFilters  = trendUp   && rsiLong  && volOk && atrExpand && candleOk && sessionOk;
+        const shortFilters = trendDown && rsiShort && volOk && atrExpand && candleOk && sessionOk;
+
+        let finalSignal = 'Hold';
+        let rrMode = '1:1';
+        if (utBuy  && longFilters)  { finalSignal = 'Buy';  rrMode = strongLong  ? '1:1.5' : '1:1'; }
+        if (utSell && shortFilters) { finalSignal = 'Sell'; rrMode = strongShort ? '1:1.5' : '1:1'; }
+
+        // ── SL / TP ──
+        const slDist = currentATR * 1.5;
+        const rrMult = rrMode === '1:1.5' ? 1.5 : 1.0;
+        const sl = finalSignal === 'Buy'  ? price - slDist : price + slDist;
+        const tp = finalSignal === 'Buy'  ? price + slDist * rrMult : price - slDist * rrMult;
+
+        // ── Position size: 1% risk ──
+        const riskINR   = (this.state?.balance || 10000) * 0.01;
+        const riskUSDT  = riskINR / BTC_USDT_RATE;
+        const posSize   = slDist > 0 ? Math.max(0.0001, parseFloat((riskUSDT / slDist).toFixed(4))) : 0.001;
+
+        // ── Save filters to state for dashboard ──
+        if (this.state) {
+            this.state.last_filters = {
+                trend:     ema200 > 0 ? (trendUp ? '✅ Above EMA' : trendDown ? '✅ Below EMA' : '❌ No trend') : '⚠️ No 1H data',
+                rsi:       (rsiLong || rsiShort) ? `✅ ${currentRSI.toFixed(1)}` : `❌ ${currentRSI.toFixed(1)}`,
+                volume:    volOk    ? `✅ ${(curVol/avgVol).toFixed(2)}x avg` : '❌ Below avg',
+                atr_exp:   atrExpand ? '✅ Expanding' : '❌ Flat/Shrinking',
+                candle:    candleOk  ? '✅ Normal'    : '❌ Too large',
+                session:   sessionOk ? '✅ Active'    : '❌ Outside hours',
+                ut_signal: utBuy ? '🟢 BUY' : utSell ? '🔴 SELL' : '⚪ None',
+                momentum:  finalSignal === 'Buy'  ? (strongLong  ? '🔥 Strong' : '📊 Normal') :
+                           finalSignal === 'Sell' ? (strongShort ? '🔥 Strong' : '📊 Normal') : '--',
+                rr_mode:   rrMode
+            };
+            this.state.last_ema200  = ema200;
+            this.state.last_rsi     = currentRSI;
+            this.state.last_atr     = currentATR;
+            this.state.last_signal  = finalSignal;
+        }
+
+        // ── Stop for chart ──
+        const activeStop = finalSignal === 'Buy'
+            ? utBot2.stop[n-1] : utBot1.stop[n-1];
+        const buySignals  = Utils.detectSignalChanges(candles5m, utBot2.pos, 1);
+        const sellSignals = Utils.detectSignalChanges(candles5m, utBot1.pos, -1);
 
         return {
-            price: latestPrice,
-            signal: finalSignal,
-            atr: currentAtr,
-            stop: currentStop,
-            indicators: { 
-                buyStop: utBot2.stop, 
-                sellStop: utBot1.stop,
-                buySignals: buySignals,
-                sellSignals: sellSignals
+            price: price, signal: finalSignal, atr: currentATR,
+            sl: sl, tp: tp, rrMode: rrMode, posSize: posSize,
+            stop: activeStop,
+            indicators: {
+                buyStop: utBot2.stop, sellStop: utBot1.stop,
+                buySignals, sellSignals
             }
         };
     }
 
     async updateTrade(signalData) {
-        const { price, signal, atr, stop } = signalData;
+        const { price, signal, atr, sl, tp, rrMode, posSize } = signalData;
         const trade = this.state.open_trade;
         let actionMsg = "Monitoring market...";
         let newLog = null;
@@ -1080,54 +1208,45 @@ class TradingEngine {
                 actionMsg = `🛑 Stop-Loss Hit @ ${Utils.formatPrice(price)}`;
             } else if (tpHit) {
                 this.closeTrade(price, "TP1 Hit");
-                actionMsg = `✅ TP1 Hit @ ${Utils.formatPrice(price)} (Full Exit)`;
+                actionMsg = `✅ TP1 Hit @ ${Utils.formatPrice(price)} [RR ${trade.rr_mode}]`;
             } else {
-                actionMsg = `Holding ${trade.type}. P/L: ${this.calculatePL(trade, price)}`;
+                actionMsg = `Holding ${trade.type} [${trade.rr_mode}]. P/L: ${this.calculatePL(trade, price)}`;
             }
         } 
         else if (signal === "Buy" || signal === "Sell") {
             const COOLDOWN_MS = 5 * 60 * 1000; 
-            
             if (this.lastTradeCloseTime && (Date.now() - this.lastTradeCloseTime < COOLDOWN_MS)) {
                 const remaining = Math.ceil((COOLDOWN_MS - (Date.now() - this.lastTradeCloseTime)) / 1000);
-                actionMsg = `⏳ Cooldown: Waiting ${remaining}s for next signal`;
-            }
-            else if (this.state.daily_stats.trades >= this.state.config.risk.max_trades) {
+                actionMsg = `⏳ Cooldown: ${remaining}s remaining`;
+            } else if (this.state.daily_stats.trades >= this.state.config.risk.max_trades) {
                 actionMsg = "Max daily trades reached.";
             } else if (this.state.daily_stats.loss >= this.state.config.risk.max_daily_loss) {
                 actionMsg = "Max daily loss reached.";
             } else {
-                this.openTrade(signal, price, atr, stop);
-                actionMsg = `🟢 Opened ${signal.toUpperCase()} @ ${Utils.formatPrice(price)}`;
+                this.openTrade(signal, price, sl, tp, rrMode, posSize || 0.001);
+                actionMsg = `🟢 Opened ${signal.toUpperCase()} @ ${Utils.formatPrice(price)} | RR: ${rrMode}`;
                 newLog = this.createLog(signal, price, "OPEN");
             }
+        } else {
+            // Show filter status in action message
+            const f = this.state.last_filters || {};
+            const session = f.session || '';
+            actionMsg = session.includes('❌') ? `⏸️ ${f.session}` : `🔍 Monitoring | RSI: ${(this.state.last_rsi||0).toFixed(1)} | ${f.ut_signal || 'No signal'}`;
         }
 
         await this.saveState();
         return { actionMsg, newLog };
     }
 
-    openTrade(type, price, atr, utbotStop) {
-        const amount = 0.001;
-        
-        let sl, tp;
-        if (type === "Buy") {
-            const atrSl = price - (2 * atr);
-            sl = Math.max(atrSl, utbotStop);
-            tp = price + (3 * atr);
-        } else {
-            const atrSl = price + (2 * atr);
-            sl = Math.min(atrSl, utbotStop);
-            tp = price - (2 * atr);
-        }
-
+    openTrade(type, price, sl, tp, rrMode, amount) {
         this.state.open_trade = {
-            type: type === "Buy" ? "LONG" : "SHORT",
+            type:        type === "Buy" ? "LONG" : "SHORT",
             entry_price: price,
-            amount: amount,
-            stop_loss: sl,
-            tp1: tp,
-            opened_at: Date.now()
+            amount:      amount || 0.001,
+            stop_loss:   sl,
+            tp1:         tp,
+            rr_mode:     rrMode || '1:1',
+            opened_at:   Date.now()
         };
     }
 
@@ -1146,12 +1265,15 @@ class TradingEngine {
         this.state.balance += inrPL;
 
         this.state.history.push({
-            type: trade.type,
+            type:        trade.type,
             entry_price: trade.entry_price,
-            exit_price: currentPrice,
-            profit_inr: inrPL,
+            exit_price:  currentPrice,
+            profit_inr:  inrPL,
             exit_reason: reason,
-            time: Date.now()
+            amount:      trade.amount,
+            rr_mode:     trade.rr_mode || '1:1',
+            opened_at:   trade.opened_at,
+            time:        Date.now()
         });
 
         this.state.daily_stats.trades++;
@@ -1160,7 +1282,6 @@ class TradingEngine {
 
         this.state.order_log.push(this.createLog(trade.type === "LONG" ? "Sell" : "Buy", currentPrice, "CLOSE"));
         this.state.open_trade = null;
-        
         this.lastTradeCloseTime = Date.now();
     }
 
@@ -2112,6 +2233,8 @@ async function mainLoop() {
 
     document.getElementById('chart-time').textContent = Utils.formatTime(Date.now());
     document.getElementById('atr-value').textContent   = '$' + signalData.atr.toFixed(2);
+    // Update filter panel from signal data
+    if (typeof updateFilterPanel === 'function') updateFilterPanel(tradingEngine.state);
 
     const isAllowed = tradingEngine.isTradingAllowed();
     let actionMsg = "Market Monitoring...";
@@ -2202,36 +2325,51 @@ window.tradingEngine   = tradingEngine;
 window.chartManager    = chartManager;
 
 // ── Keep-Alive Ping ───────────────────────────────────────────────
-// Pings the Render bot every 5 minutes to prevent sleep
 const PING_URL      = 'https://adv-scalping-bot-dashboard.onrender.com/health';
-const PING_INTERVAL = 5 * 60 * 1000; // 5 minutes
+const PING_INTERVAL = 5 * 60 * 1000;
+const _pingLog      = [];
 
 async function pingBot() {
+    const t = new Date().toLocaleTimeString('en-IN', {timeZone:'Asia/Kolkata', hour:'2-digit', minute:'2-digit', second:'2-digit'});
+    let ok = false;
     try {
-        const res = await fetch(PING_URL, { method: 'GET', mode: 'no-cors' });
-        console.log('[' + new Date().toLocaleTimeString() + '] ✅ Bot pinged successfully');
+        await fetch(PING_URL, { method: 'GET', mode: 'no-cors' });
+        ok = true;
+        console.log('[' + t + '] ✅ Bot pinged');
         updatePingStatus('✅ Alive', true);
     } catch(e) {
-        console.warn('[' + new Date().toLocaleTimeString() + '] ⚠️ Ping failed:', e.message);
+        console.warn('[' + t + '] ⚠️ Ping failed:', e.message);
         updatePingStatus('⚠️ Unreachable', false);
     }
+    // Add to log
+    _pingLog.unshift({ time: t, ok: ok });
+    if (_pingLog.length > 10) _pingLog.pop();
+    renderPingLog();
+}
+
+function renderPingLog() {
+    const ul = document.getElementById('ping-log');
+    if (!ul) return;
+    ul.innerHTML = '';
+    _pingLog.forEach(p => {
+        const li = document.createElement('li');
+        li.style.cssText = 'padding:2px 0; border-bottom:1px solid var(--border-color); display:flex; justify-content:space-between; font-size:0.7rem;';
+        li.innerHTML = '<span style="color:var(--text-muted);">' + p.time + '</span>' +
+            '<span style="color:' + (p.ok ? 'var(--accent-green)' : 'var(--accent-yellow)') + ';font-weight:700;">' +
+            (p.ok ? '✅ OK' : '⚠️ Fail') + '</span>';
+        ul.appendChild(li);
+    });
 }
 
 function updatePingStatus(msg, ok) {
-    const el = document.getElementById('ping-status');
-    if (el) {
-        el.textContent = msg;
-        el.style.color = ok ? 'var(--accent-green)' : 'var(--accent-yellow)';
-    }
+    const el  = document.getElementById('ping-status');
+    if (el) { el.textContent = msg; el.style.color = ok ? 'var(--accent-green)' : 'var(--accent-yellow)'; }
     const dot = document.getElementById('ping-dot');
-    if (dot) {
-        dot.style.background = ok ? 'var(--accent-green)' : 'var(--accent-yellow)';
-    }
+    if (dot) dot.style.background = ok ? 'var(--accent-green)' : 'var(--accent-yellow)';
     const time = document.getElementById('ping-time');
-    if (time) time.textContent = 'Last ping: ' + new Date().toLocaleTimeString();
+    if (time) time.textContent = 'Last: ' + new Date().toLocaleTimeString('en-IN', {timeZone:'Asia/Kolkata'});
 }
 
-// Ping immediately on load then every 5 minutes
 pingBot();
 setInterval(pingBot, PING_INTERVAL);
 
