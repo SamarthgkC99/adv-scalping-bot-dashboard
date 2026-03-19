@@ -1027,12 +1027,7 @@ class TradingEngine {
         if (this.state.config.force_start) return { allowed: true, reason: null };
         if (this.state.config.manual_pause) return { allowed: false, reason: "Manually Paused" };
         
-        if (this.state.config.trading_hours.enabled) {
-            const hour = new Date().getHours();
-            if (hour < this.state.config.trading_hours.start || hour >= this.state.config.trading_hours.end) {
-                return { allowed: false, reason: `Outside Hours (${this.state.config.trading_hours.start}:00-${this.state.config.trading_hours.end}:00)` };
-            }
-        }
+        // Session filter removed — trading 24/7
         return { allowed: true, reason: null };
     }
 
@@ -1173,8 +1168,8 @@ class TradingEngine {
         const strongShort = currentRSI < 40 && curVol >= avgVol * 1.5;
 
         // ── Final signal with all filters ──
-        const longFilters  = trendUp   && rsiLong  && volOk && atrExpand && candleOk && sessionOk;
-        const shortFilters = trendDown && rsiShort && volOk && atrExpand && candleOk && sessionOk;
+        const longFilters  = trendUp   && rsiLong  && volOk && atrExpand && candleOk;
+        const shortFilters = trendDown && rsiShort && volOk && atrExpand && candleOk;
 
         let finalSignal = 'Hold';
         let rrMode = '1:1';
@@ -1200,7 +1195,7 @@ class TradingEngine {
                 volume:    volOk    ? `✅ ${(curVol/avgVol).toFixed(2)}x avg` : '❌ Below avg',
                 atr_exp:   atrExpand ? '✅ Expanding' : '❌ Flat/Shrinking',
                 candle:    candleOk  ? '✅ Normal'    : '❌ Too large',
-                session:   sessionOk ? '✅ Active'    : '❌ Outside hours',
+                session:   '✅ 24/7 (No session filter)',
                 ut_signal: utBuy ? '🟢 BUY' : utSell ? '🔴 SELL' : '⚪ None',
                 momentum:  finalSignal === 'Buy'  ? (strongLong  ? '🔥 Strong' : '📊 Normal') :
                            finalSignal === 'Sell' ? (strongShort ? '🔥 Strong' : '📊 Normal') : '--',
